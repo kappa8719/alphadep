@@ -1,0 +1,27 @@
+[package]
+name = "alphadep"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+russh = { version = "0.51.1" }
+glob = "0.3.2"
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+russh-sftp = "2.1.0"
+zip = "2.6.1"
+uuid = { version = "1.16.0", features = ["v4"] }
+tokio-fs = "0.1.7"
+
+[workspace]
+members = ["runtime-wrapper"]
+
+[workspace.dependencies]
+alphadep = { path = "." }
+alphadep-runtime = { path = "./runtime-wrapper" }
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0.12"
+tokio = { version = "1.44.1", features = ["fs"] }
+toml = "0.8.20"

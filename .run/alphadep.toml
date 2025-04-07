@@ -1,0 +1,23 @@
+[machine]
+type = "remote/ssh"
+host = "$redacted"
+user = "ubuntu"
+identity = { type = "key", path = "$redacted" }
+#identity = { type = "password", value = "a" }
+
+[deployment]
+id = "entropi.mailer"
+
+[deployment.build]
+machine = "master"
+
+[deployment.runtime]
+context = "session"
+execute = ""
+
+[deployment.files]
+excludes = [".*"]
+includes = [".env"]
+
+[deployment.environment-variables]
+build="1"
