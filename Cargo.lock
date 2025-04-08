@@ -70,6 +70,7 @@ name = "alphadep"
 version = "0.1.0"
 dependencies = [
  "glob",
+ "log",
  "russh",
  "russh-sftp",
  "serde",

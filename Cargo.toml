@@ -20,8 +20,11 @@ members = ["runtime-wrapper"]
 
 [workspace.dependencies]
 alphadep = { path = "." }
-alphadep-runtime = { path = "./runtime-wrapper" }
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = { version = "1.44.1", features = ["fs"] }
 toml = "0.8.20"
+log = "0.4.27"
+
+[build-dependencies]
+log.workspace = true
