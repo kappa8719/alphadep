@@ -5,7 +5,7 @@ use crate::configuration::runtime::RuntimeConfiguration;
 use crate::machine::{AsyncMachine, Machine};
 use russh::client::{AuthResult, Handle};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
-use russh::{Preferred, client};
+use russh::{client, Preferred};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
 use std::borrow::Cow;
@@ -15,7 +15,6 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
 
 pub struct SSHHandler;
 
