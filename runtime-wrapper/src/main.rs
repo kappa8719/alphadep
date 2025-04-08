@@ -6,16 +6,18 @@ fn main() {
     let configuration = fs::read_to_string("alphadep-runtime.toml").unwrap();
     let configuration = toml::from_str::<RuntimeConfiguration>(configuration.as_str()).unwrap();
 
-    let build_result = Command::new("sh")
-        .arg("-c")
-        .arg(configuration.build.command.clone())
-        .output()
-        .unwrap();
-    println!(
-        "build result {:?}\n{}",
-        build_result.status.code(),
-        String::from_utf8(build_result.stdout).unwrap().as_str()
-    );
+    if let Some(build_script) = configuration.build.script.clone() {
+        let build_result = Command::new("sh")
+            .arg("-c")
+            .arg(build_script)
+            .output()
+            .unwrap();
+        println!(
+            "build result {:?}\n{}",
+            build_result.status.code(),
+            String::from_utf8(build_result.stdout).unwrap().as_str()
+        );
+    }
 
     let exec_result = Command::new("sh")
         .arg("-c")
