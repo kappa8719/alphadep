@@ -1,9 +1,8 @@
 [machine]
 type = "remote/ssh"
-host = "$redacted"
+host = "smtp.posts.kr"
 user = "ubuntu"
-identity = { type = "key", path = "$redacted" }
-#identity = { type = "password", value = "a" }
+identity = { type = "key", path = "/home/arcranion/.ssh/general_a.pem" }
 
 [deployment]
 id = "entropi.mailer"

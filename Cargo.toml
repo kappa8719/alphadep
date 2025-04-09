@@ -14,9 +14,10 @@ russh-sftp = "2.1.0"
 zip = "2.6.1"
 uuid = { version = "1.16.0", features = ["v4"] }
 tokio-fs = "0.1.7"
+clap = { version = "4.5.35", features = ["derive"] }
 
 [workspace]
-members = ["runtime-wrapper"]
+members = ["runtime"]
 
 [workspace.dependencies]
 alphadep = { path = "." }

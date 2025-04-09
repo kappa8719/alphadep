@@ -1,20 +1,38 @@
-use crate::configuration::deployment::DeploymentFileArchiveError;
-use crate::configuration::machine::{SSHIdentityConfiguration, SSHMachineConfiguration};
-use crate::configuration::project::ProjectConfiguration;
-use crate::configuration::runtime::RuntimeConfiguration;
-use crate::machine::{AsyncMachine, Machine};
-use russh::client::{AuthResult, Handle};
-use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
-use russh::{client, Preferred};
-use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::OpenFlags;
-use std::borrow::Cow;
-use std::fmt::{Debug, Display, Formatter};
-use std::io;
-use std::io::Write;
-use std::sync::Arc;
-use std::time::Duration;
+use crate::runtime::interface::CLI_API_COMPATIBILITY_FLAG;
+use crate::{
+    configuration::{
+        deployment::DeploymentFileArchiveError,
+        machine::{SSHIdentityConfiguration, SSHMachineConfiguration},
+        project::ProjectConfiguration,
+        runtime::RuntimeConfiguration,
+    },
+    machine::{AsyncMachine, Machine},
+};
+use russh::keys::ssh_encoding::Reader;
+use russh::{
+    Channel, ChannelMsg, Disconnect, Error, Preferred, client,
+    client::{AuthResult, Handle, Msg},
+    keys::{PrivateKeyWithHashAlg, PublicKey},
+};
+use russh_sftp::{client::SftpSession, protocol::OpenFlags};
+use std::fmt::format;
+use std::io::BufReader;
+use std::path::Path;
+use std::{
+    borrow::Cow,
+    fmt::{Debug, Display, Formatter},
+    io,
+    io::Write,
+    sync::Arc,
+    time::Duration,
+};
 use thiserror::Error;
+
+const DEFAULT_RUNTIME_WRAPPER_PATHS: &[&str] = &[
+    "~/.alphadep/runtime",
+    ".alphadep/runtime",
+    "/bin/alphadep-runtime",
+];
 
 pub struct SSHHandler;
 
@@ -42,6 +60,7 @@ pub enum SSHError {
     SftpError(#[from] russh_sftp::client::error::Error),
     UpdateError(#[from] DeploymentFileArchiveError),
     IOError(#[from] io::Error),
+    UnknownError,
 }
 
 impl Display for SSHError {
@@ -91,7 +110,71 @@ impl SSHMachine {
         }
     }
 
-    fn build_archive(project_configuration: ProjectConfiguration) {}
+    pub async fn channel(&self) -> Result<Channel<Msg>, SSHError> {
+        let channel = self.handle.channel_open_session().await?;
+        Ok(channel)
+    }
+
+    pub async fn sftp(&self) -> Result<SftpSession, SSHError> {
+        let channel = self.channel().await?;
+        channel.request_subsystem(true, "sftp").await.unwrap();
+        Ok(SftpSession::new(channel.into_stream()).await.unwrap())
+    }
+
+    /// acquires runtime wrapper using temporary sftp session
+    pub async fn acquire_wrapper(
+        &self,
+        temporary: bool,
+        force_update: bool,
+        path: Option<String>,
+    ) -> Result<(), SSHError> {
+        let mut channel = self.channel().await?;
+        let sftp = self.sftp().await?;
+
+        let paths = match path {
+            None => DEFAULT_RUNTIME_WRAPPER_PATHS
+                .iter()
+                .map(|&v| v.to_string())
+                .collect::<Vec<_>>(),
+            Some(path) => [
+                &[path],
+                &DEFAULT_RUNTIME_WRAPPER_PATHS
+                    .iter()
+                    .map(|&v| v.to_string())
+                    .collect::<Vec<_>>()[..],
+            ]
+            .concat(),
+        };
+
+        let _ = paths.iter().map(|&path| async {
+            let metadata = sftp.metadata(path).await?;
+            if metadata.is_dir() {
+                return Err(SSHError::UnknownError);
+            }
+
+            channel
+                .exec(true, format!("{} {}", path, CLI_API_COMPATIBILITY_FLAG))
+                .await?;
+
+            let Some(ChannelMsg::Data { ref data }) = channel.wait().await else {
+                return Err(SSHError::UnknownError);
+            };
+
+            let Ok(str) = data.clone().read_string(&mut []) else {
+                return Err(SSHError::UnknownError);
+            };
+
+            Ok(())
+        });
+
+        Ok(())
+    }
+
+    pub async fn close(&self) -> Result<(), Error> {
+        self.handle
+            .disconnect(Disconnect::ByApplication, "close called", "")
+            .await
+    }
 }
 
 impl AsyncMachine for SSHMachine {
@@ -99,11 +182,10 @@ impl AsyncMachine for SSHMachine {
     type BuildError = ();
     type ExecuteError = ();
 
+    /// Update archive using temporary sftp tunnel
     async fn update(&self, project: ProjectConfiguration) -> Result<(), Self::UpdateError> {
-        let channel = self.handle.channel_open_session().await?;
-        channel.request_subsystem(true, "sftp").await.unwrap();
+        let sftp = self.sftp().await?;
 
-        let sftp = SftpSession::new(channel.into_stream()).await.unwrap();
         let mut archive_dst = sftp
             .open_with_flags(
                 "alphadep-archive",
@@ -132,6 +214,9 @@ impl AsyncMachine for SSHMachine {
         let mut archive_tmp = tokio::fs::File::open(archive_tmp_path).await?;
 
         tokio::io::copy(&mut archive_tmp, &mut archive_dst).await?;
+
+        // close session and channel
+        sftp.close().await?;
 
         Ok(())
     }
