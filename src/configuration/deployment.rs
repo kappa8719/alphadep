@@ -1,17 +1,15 @@
-use glob::{GlobError, GlobResult, Paths, PatternError, glob};
-use russh::keys::signature::digest::typenum::op;
+use glob::glob;
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io;
 use std::io::{Seek, Write};
-use std::iter::zip;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use zip::ZipWriter;
 use zip::result::ZipError;
 use zip::write::SimpleFileOptions;
+use zip::ZipWriter;
 
 #[derive(Deserialize, Debug, Default, Clone)]
 pub enum DeploymentRuntimeContext {
@@ -179,4 +177,10 @@ pub struct DeploymentConfiguration {
     pub build: DeploymentBuild,
     #[serde(rename = "environment-variables", default)]
     pub environment_variables: HashMap<String, String>,
+}
+
+impl DeploymentConfiguration {
+    pub fn get_working_directory(&self) -> PathBuf {
+        PathBuf::from(format!("~/.alphadep/deployments/{}", self.id))
+    }
 }

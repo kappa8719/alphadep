@@ -29,9 +29,15 @@ impl client::Handler for SSHHandler {
     }
 }
 
+pub struct SSHMachineRuntimeInfo {
+    path: String,
+    compatibility: i32
+}
+
 pub struct SSHMachine {
     pub configuration: SSHMachineConfiguration,
     pub handle: Handle<SSHHandler>,
+    pub runtime: Option<SSHMachineRuntimeInfo>,
 }
 
 #[derive(Error, Debug)]
@@ -68,6 +74,7 @@ impl SSHMachine {
         Ok(Self {
             configuration,
             handle,
+            runtime: None
         })
     }
 
@@ -91,7 +98,15 @@ impl SSHMachine {
         }
     }
 
-    fn build_archive(project_configuration: ProjectConfiguration) {}
+    async fn acquire_runtime(&mut self, project_configuration: ProjectConfiguration) -> Result<(), SSHError> {
+        let session = self.handle.channel_open_session().await?;
+        let sftp = SftpSession::new(session.into_stream()).await?;
+
+        let working_directory = project_configuration.deployment.get_working_directory();
+        let runtime_file = working_directory.join(".alphadep-runtime");
+
+        Ok(())
+    }
 }
 
 impl AsyncMachine for SSHMachine {
