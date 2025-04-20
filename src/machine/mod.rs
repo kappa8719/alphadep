@@ -1,6 +1,4 @@
-use crate::configuration::project::ProjectConfiguration;
-use crate::configuration::runtime::RuntimeConfiguration;
-use serde::Serialize;
+use interface::configuration::{project::ProjectConfiguration, runtime::RuntimeConfiguration};
 
 pub mod ssh;
 
@@ -19,7 +17,11 @@ pub trait AsyncMachine {
     type BuildError;
     type ExecuteError;
 
-    async fn update(&self, project: ProjectConfiguration) -> Result<(), Self::UpdateError>;
-    async fn build(&self, project: ProjectConfiguration) -> Result<(), Self::BuildError>;
-    async fn execute(&self, runtime: RuntimeConfiguration) -> Result<(), Self::ExecuteError>;
+    async fn update(&mut self, project: ProjectConfiguration) -> Result<(), Self::UpdateError>;
+    async fn build(&mut self, project: ProjectConfiguration) -> Result<(), Self::BuildError>;
+    async fn execute(
+        &mut self,
+        project: ProjectConfiguration,
+        runtime: RuntimeConfiguration,
+    ) -> Result<(), Self::ExecuteError>;
 }

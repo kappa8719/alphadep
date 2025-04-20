@@ -1,4 +1,4 @@
-use crate::configuration::project::ProjectConfiguration;
+use interface::configuration::project::ProjectConfiguration;
 use std::path::PathBuf;
 
 pub struct DeploymentSpecs {
