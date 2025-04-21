@@ -11,8 +11,10 @@ use russh::{
     keys::{PrivateKeyWithHashAlg, PublicKey},
 };
 use russh_sftp::client::run;
+use russh_sftp::protocol::FileAttributes;
 use russh_sftp::{client::SftpSession, protocol::OpenFlags};
 use std::fmt::format;
+use std::io::stdout;
 use std::path::PathBuf;
 use std::{
     borrow::Cow,
@@ -164,6 +166,37 @@ impl SSHMachine {
     pub fn runtime_path(&self, project: ProjectConfiguration) -> PathBuf {
         self.deployment_dir(project.clone()).join("runtime")
     }
+
+    // pipe all stdout of exec
+    async fn exec_stdout(channel: &mut Channel<Msg>) {
+        loop {
+            let mut stdout = tokio::io::stdout();
+            if let Some(data) = channel.wait().await {
+                match data {
+                    ChannelMsg::Data { ref data } => {
+                        stdout
+                            .write_all(b"remote/ssh: exec received -- ")
+                            .await
+                            .unwrap();
+                        stdout.write_all(data).await.unwrap();
+                        stdout.flush().await.unwrap();
+                    }
+                    ChannelMsg::ExitStatus { exit_status } => {
+                        stdout
+                            .write_all(
+                                format!("remote/ssh: exec exited {exit_status}\n").as_bytes(),
+                            )
+                            .await
+                            .unwrap();
+                        break;
+                    }
+                    _ => {}
+                }
+            } else {
+                break;
+            }
+        }
+    }
 }
 
 impl AsyncMachine for SSHMachine {
@@ -174,6 +207,10 @@ impl AsyncMachine for SSHMachine {
     /// Update archive using temporary sftp tunnel
     async fn update(&mut self, project: ProjectConfiguration) -> Result<(), Self::UpdateError> {
         let sftp = self.sftp().await?;
+
+        // create deployment directory
+        self.mkdir(&sftp, self.deployment_dir(project.clone()))
+            .await?;
 
         let archive_dst_path = self.deployment_dir(project.clone()).join("archive");
 
@@ -223,9 +260,13 @@ impl AsyncMachine for SSHMachine {
 
         // upload runtime
         let mut runtime_dst = sftp
-            .open_with_flags(
+            .open_with_flags_and_attributes(
                 runtime_path.clone(),
                 OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE,
+                FileAttributes {
+                    permissions: Some(0o777),
+                    ..Default::default()
+                },
             )
             .await?;
         runtime_dst
@@ -236,6 +277,23 @@ impl AsyncMachine for SSHMachine {
 
         // create workdir
         self.mkdir(&sftp, workdir.clone()).await?;
+
+        let mut channel = self.channel().await?;
+
+        // extract
+        channel
+            .exec(
+                true,
+                format!(
+                    "{r} --archive.extract {src} --archive.extract.dest {dst} --archive.extract.overwrite",
+                    r = runtime_path.clone(),
+                    src = archive_dst_path.to_str().unwrap(),
+                    dst = workdir.to_str().unwrap()
+                ),
+            )
+            .await?;
+
+        Self::exec_stdout(&mut channel).await;
 
         let mut runtime_configuration_dst = sftp
             .open_with_flags(
@@ -252,32 +310,6 @@ impl AsyncMachine for SSHMachine {
 
         // close session and channel used for sftp
         sftp.close().await?;
-
-        let mut channel = self.channel().await?;
-
-        // extract
-        channel
-            .exec(
-                true,
-                format!(
-                    "{r} --archive.extract {src} --archive.extract.dest {dst}",
-                    r = runtime_path.clone(),
-                    src = archive_dst_path.to_str().unwrap(),
-                    dst = self.deployment_dir(project).join("work").to_str().unwrap()
-                ),
-            )
-            .await?;
-
-        loop {
-            if let Some(data) = channel.wait().await {
-                match data {
-                    ChannelMsg::ExitStatus { .. } => {
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-        }
 
         Ok(())
     }
@@ -297,7 +329,9 @@ impl AsyncMachine for SSHMachine {
         let runtime_path = self.runtime_path(project).to_str().unwrap().to_string();
 
         // change to workdir
-        channel.exec(false, format!("cd {}", workdir.to_str().unwrap())).await?;
+        channel
+            .exec(false, format!("cd {}", workdir.to_str().unwrap()))
+            .await?;
 
         // execute
         channel

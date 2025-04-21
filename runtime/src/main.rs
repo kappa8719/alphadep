@@ -15,6 +15,9 @@ pub struct CommandLineArgs {
     #[arg(long = "archive.extract.dest")]
     archive_extract_dest: Option<String>,
 
+    #[arg(long = "archive.extract.overwrite", default_value_t = false)]
+    archive_extract_overwrite: bool,
+
     #[arg(long = "build", default_value_t = false)]
     build: bool,
     #[arg(long = "execute", default_value_t = false)]
@@ -39,6 +42,14 @@ fn main() {
             dest_root.to_str().unwrap()
         );
 
+        if args.archive_extract_overwrite {
+            println!("archive/extract: restructuring destination root -");
+            fs::remove_dir_all(dest_root.clone()).unwrap();
+        }
+
+        fs::create_dir_all(dest_root.clone()).unwrap();
+
+        println!("archive/extract: extracting -");
         let path = PathBuf::from(extract);
         let file = File::open(path).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
