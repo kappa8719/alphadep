@@ -1,3 +1,5 @@
+mod sftp;
+
 use crate::{machine::AsyncMachine, runtime};
 use interface::configuration::{
     deployment::DeploymentFileArchiveError,
@@ -16,13 +18,7 @@ use russh_sftp::{client::SftpSession, protocol::OpenFlags};
 use std::fmt::format;
 use std::io::stdout;
 use std::path::PathBuf;
-use std::{
-    borrow::Cow,
-    fmt::{Debug, Display, Formatter},
-    io,
-    sync::Arc,
-    time::Duration,
-};
+use std::{borrow::Cow, fmt::{Debug, Display, Formatter}, fs, io, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 
@@ -119,13 +115,13 @@ impl SSHMachine {
         ))
     }
 
-    pub async fn channel(&self) -> Result<Channel<Msg>, anyhow::Error> {
+    pub async fn acquire_channel(&self) -> Result<Channel<Msg>, anyhow::Error> {
         let channel = self.handle.channel_open_session().await?;
         Ok(channel)
     }
 
-    pub async fn sftp(&self) -> Result<SftpSession, anyhow::Error> {
-        let channel = self.channel().await?;
+    pub async fn acquire_sftp(&self) -> Result<SftpSession, anyhow::Error> {
+        let channel = self.acquire_channel().await?;
         channel.request_subsystem(true, "sftp").await?;
         Ok(SftpSession::new(channel.into_stream()).await?)
     }
@@ -138,7 +134,7 @@ impl SSHMachine {
     }
 
     /// Create directories recursively on remote using sftp session
-    pub async fn mkdir(&self, sftp: &SftpSession, path: PathBuf) -> Result<(), anyhow::Error> {
+    pub async fn create_dir_all(&self, sftp: &SftpSession, path: PathBuf) -> Result<(), anyhow::Error> {
         let mut paths = vec![path];
         while let Some(parent) = paths.first().map(|p| p.parent()).flatten() {
             paths.insert(0, parent.to_path_buf());
@@ -206,10 +202,10 @@ impl AsyncMachine for SSHMachine {
 
     /// Update archive using temporary sftp tunnel
     async fn update(&mut self, project: ProjectConfiguration) -> Result<(), Self::UpdateError> {
-        let sftp = self.sftp().await?;
+        let sftp = self.acquire_sftp().await?;
 
         // create deployment directory
-        self.mkdir(&sftp, self.deployment_dir(project.clone()))
+        self.create_dir_all(&sftp, self.deployment_dir(project.clone()))
             .await?;
 
         let archive_dst_path = self.deployment_dir(project.clone()).join("archive");
@@ -276,9 +272,9 @@ impl AsyncMachine for SSHMachine {
         let workdir = self.deployment_dir(project.clone()).join("work");
 
         // create workdir
-        self.mkdir(&sftp, workdir.clone()).await?;
+        self.create_dir_all(&sftp, workdir.clone()).await?;
 
-        let mut channel = self.channel().await?;
+        let mut channel = self.acquire_channel().await?;
 
         // extract
         channel
@@ -323,7 +319,7 @@ impl AsyncMachine for SSHMachine {
         project: ProjectConfiguration,
         runtime: RuntimeConfiguration,
     ) -> Result<(), Self::ExecuteError> {
-        let mut channel = self.channel().await?;
+        let mut channel = self.acquire_channel().await?;
 
         let workdir = self.deployment_dir(project.clone()).join("work");
         let runtime_path = self.runtime_path(project).to_str().unwrap().to_string();
