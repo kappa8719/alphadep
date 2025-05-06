@@ -1,13 +1,14 @@
 mod args;
 
 use crate::cli::args::CommandLineArgs;
-use crate::machine::ssh::SSHMachine;
 use crate::machine::AsyncMachine;
+use crate::machine::ssh::SSHMachine;
 use clap::Parser;
 use interface::configuration::runtime::RuntimeConfiguration;
 use interface::{
     configuration::machine::MachineConfiguration, configuration::project::ProjectConfiguration,
 };
+use log::info;
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -49,30 +50,24 @@ pub fn handle() -> Result<(), ()> {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    println!("remote/ssh: connecting -");
+                    info!("remote/ssh: connecting -");
                     let mut machine = SSHMachine::connect(machine_configuration)
                         .await
                         .expect("failed to connect with ssh");
 
-                    println!("remote/ssh: authenticating -");
-                    let _ = machine
+                    info!("remote/ssh: authenticating -");
+                    machine
                         .authenticate()
                         .await
                         .expect("failed to authenticate ssh machine");
 
-                    println!("remote/ssh: updating remote -");
+                    info!("remote/ssh: updating remote -");
                     machine.update(configuration.clone()).await.unwrap();
 
-                    println!("remote/ssh: executing -");
-                    machine
-                        .execute(
-                            configuration.clone(),
-                            RuntimeConfiguration::from(configuration.clone()),
-                        )
-                        .await
-                        .unwrap();
+                    info!("remote/ssh: executing -");
+                    machine.execute(configuration.clone()).await.unwrap();
 
-                    println!("remote/ssh: closing -");
+                    info!("remote/ssh: closing -");
                     machine.close().await.expect("failed to close ssh");
                 })
         }

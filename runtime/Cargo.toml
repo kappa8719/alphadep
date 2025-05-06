@@ -8,3 +8,9 @@ interface.workspace = true
 toml.workspace = true
 clap.workspace = true
 zip.workspace = true
+run_script = "0.11.0"
+colog = "1.3.0"
+log.workspace = true
+ctrlc = { version = "3.4.5", features = ["termination"] }
+libc = "0.2.172"
+nix = { version = "0.30.1", features = ["signal"] }

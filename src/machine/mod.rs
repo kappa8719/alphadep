@@ -21,7 +21,6 @@ pub trait AsyncMachine {
     async fn build(&mut self, project: ProjectConfiguration) -> Result<(), Self::BuildError>;
     async fn execute(
         &mut self,
-        project: ProjectConfiguration,
-        runtime: RuntimeConfiguration,
+        project: ProjectConfiguration
     ) -> Result<(), Self::ExecuteError>;
 }

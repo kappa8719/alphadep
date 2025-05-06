@@ -12,7 +12,7 @@ machine = "master"
 
 [deployment.runtime]
 context = "session"
-execute = ""
+execute = "chmod +x ./test.sh && ./test.sh"
 
 [deployment.files]
 excludes = [".*"]
