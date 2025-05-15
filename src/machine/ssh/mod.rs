@@ -6,8 +6,8 @@ pub mod sftp;
 use crate::machine::ssh::channel::SSHExecution;
 use crate::machine::ssh::handler::SSHHandle;
 use crate::{
-    machine::AsyncMachine,
     machine::ssh::sftp::{Sftp, SftpOpenOptions},
+    machine::AsyncMachine,
     runtime,
 };
 use interface::configuration::{
@@ -16,8 +16,7 @@ use interface::configuration::{
     runtime::RuntimeConfiguration,
 };
 use log::info;
-use russh::{Channel, ChannelMsg, Preferred, client, client::Msg, keys::PrivateKeyWithHashAlg};
-use russh_sftp::{client::SftpSession, protocol::FileAttributes, protocol::OpenFlags};
+use makiko::ClientEvent;
 use std::path::PathBuf;
 use std::{
     borrow::Cow,
@@ -26,31 +25,22 @@ use std::{
     time::Duration,
 };
 use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 
 pub struct SSHMachine {
     pub configuration: SSHMachineConfiguration,
-    pub handle: SSHHandle,
+
 }
 
 impl SSHMachine {
     pub async fn connect(configuration: SSHMachineConfiguration) -> Result<Self, anyhow::Error> {
-        let config = Arc::new(client::Config {
-            inactivity_timeout: None,
-            preferred: Preferred {
-                kex: Cow::Owned(vec![
-                    russh::kex::CURVE25519_PRE_RFC_8731,
-                    russh::kex::EXTENSION_SUPPORT_AS_CLIENT,
-                ]),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-        let handle = SSHHandle::connect(config, configuration.host.clone(), 22).await?;
+        let stream = TcpStream::connect(configuration.host).await?;
+        let config = makiko::ClientConfig::default_compatible_less_secure();
+        let (client, mut client_rx, client_fut) = makiko::Client::open(stream, config)?;
 
-        Ok(Self {
-            configuration,
-            handle,
-        })
+        tokio::task::spawn(client_fut);
+
+        todo!()
     }
 
     pub async fn authenticate(&mut self) -> Result<(), anyhow::Error> {

@@ -1,9 +1,0 @@
-[package]
-name = "ssh"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-bon = "3.6.3"
-russh = { version = "0.51.1" }
-tokio.workspace = true

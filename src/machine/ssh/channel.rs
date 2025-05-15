@@ -188,7 +188,9 @@ impl SSHChannel {
                         })
                     };
                 }
-                _ => continue,
+                _ => {
+                    info!("remote/ssh: pass-through channel data: {:#?}", data)
+                },
             }
         }
     }
