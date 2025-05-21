@@ -1,7 +1,7 @@
-use crate::configuration::project::ProjectConfiguration;
+use crate::ProjectSpecification;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RuntimeBuildConfiguration {
@@ -22,8 +22,8 @@ pub struct RuntimeConfiguration {
     pub created_at: SystemTime,
 }
 
-impl From<ProjectConfiguration> for RuntimeConfiguration {
-    fn from(value: ProjectConfiguration) -> Self {
+impl From<ProjectSpecification> for RuntimeConfiguration {
+    fn from(value: ProjectSpecification) -> Self {
         Self {
             build: RuntimeBuildConfiguration {
                 script: value.deployment.build.script,

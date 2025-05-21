@@ -1,4 +1,7 @@
-pub mod project;
-pub mod machine;
-pub mod deployment;
-pub mod runtime;
+mod deployment;
+mod machine;
+mod runtime;
+
+pub use deployment::*;
+pub use machine::*;
+pub use runtime::*;

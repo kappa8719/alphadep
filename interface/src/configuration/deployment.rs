@@ -1,15 +1,15 @@
 use glob::glob;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
 use std::fs::File;
 use std::io;
 use std::io::{Seek, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use zip::ZipWriter;
 use zip::result::ZipError;
 use zip::write::SimpleFileOptions;
-use zip::ZipWriter;
 
 #[derive(Deserialize, Debug, Default, Clone)]
 pub enum DeploymentRuntimeContext {
@@ -37,27 +37,32 @@ pub struct DeploymentFiles {
 
 #[derive(Error, Debug)]
 pub enum DeploymentFileGlobError {
-    PatternError(#[from] glob::PatternError),
+    #[error("deployment file glob failed pattern at position {position}: {message}")]
+    PatternError {
+        position: usize,
+        message: &'static str,
+    },
+    #[error("deployment file glob failed on path {path:?} with error {error:?}")]
     GlobError { path: PathBuf, error: io::ErrorKind },
+}
+
+impl From<glob::PatternError> for DeploymentFileGlobError {
+    fn from(value: glob::PatternError) -> Self {
+        Self::PatternError {
+            position: value.pos,
+            message: value.msg,
+        }
+    }
 }
 
 #[derive(Error, Debug)]
 pub enum DeploymentFileArchiveError {
+    #[error("deployment archive failed due to compression error")]
     ZipError(#[from] ZipError),
+    #[error("deployment archive failed due to glob failure")]
     GlobError(#[from] DeploymentFileGlobError),
+    #[error("deployment archive failed due to copy failure")]
     CopyError(#[from] io::Error),
-}
-
-impl Display for DeploymentFileGlobError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self, f)
-    }
-}
-
-impl Display for DeploymentFileArchiveError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self, f)
-    }
 }
 
 impl DeploymentFiles {

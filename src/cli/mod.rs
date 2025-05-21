@@ -4,10 +4,7 @@ use crate::cli::args::CommandLineArgs;
 use crate::machine::AsyncMachine;
 use crate::machine::ssh::SSHMachine;
 use clap::Parser;
-use interface::configuration::runtime::RuntimeConfiguration;
-use interface::{
-    configuration::machine::MachineConfiguration, configuration::project::ProjectConfiguration,
-};
+use interface::{MachineConfiguration, ProjectSpecification};
 use log::info;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -22,7 +19,7 @@ pub fn handle() -> Result<(), ()> {
     file.read_to_string(&mut buffer)
         .expect("failed to read alphadep.toml");
 
-    let configuration = toml::from_str::<ProjectConfiguration>(buffer.as_str())
+    let project = toml::from_str::<ProjectSpecification>(buffer.as_str())
         .expect("failed to parse alphadep.toml");
 
     if cli_args.write_archive {
@@ -33,7 +30,7 @@ pub fn handle() -> Result<(), ()> {
             .open("./alphadep-archive")
             .unwrap();
 
-        configuration
+        project
             .deployment
             .files
             .write_archive(&mut archive_file, vec!["./alphadep-archive"])
@@ -43,34 +40,29 @@ pub fn handle() -> Result<(), ()> {
         return Ok(());
     }
 
-    match configuration.clone().machine {
-        MachineConfiguration::RemoteSSH(machine_configuration) => {
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async {
-                    info!("remote/ssh: connecting -");
-                    let mut machine = SSHMachine::connect(machine_configuration)
-                        .await
-                        .expect("failed to connect with ssh");
+    match project.clone().machine {
+        MachineConfiguration::RemoteSSH(machine) => tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                info!("remote/ssh: connecting -");
+                let mut machine = SSHMachine::handshake(project, machine)
+                    .await
+                    .expect("failed to connect with ssh");
 
-                    info!("remote/ssh: authenticating -");
-                    machine
-                        .authenticate()
-                        .await
-                        .expect("failed to authenticate ssh machine");
+                info!("remote/ssh: authenticating -");
+                machine
+                    .authenticate()
+                    .await
+                    .expect("failed to authenticate");
 
-                    info!("remote/ssh: updating remote -");
-                    machine.update(configuration.clone()).await.unwrap();
+                info!("remote/ssh: updating remote -");
+                machine.update().await.unwrap();
 
-                    info!("remote/ssh: executing -");
-                    machine.execute(configuration.clone()).await.unwrap();
-
-                    info!("remote/ssh: closing -");
-                    machine.close().await.expect("failed to close ssh");
-                })
-        }
+                info!("remote/ssh: executing -");
+                machine.execute().await.unwrap();
+            }),
     }
 
     Ok(())

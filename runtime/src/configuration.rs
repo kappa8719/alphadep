@@ -1,4 +1,4 @@
-use interface::configuration::runtime::RuntimeConfiguration;
+use interface::RuntimeConfiguration;
 use std::fs;
 
 pub fn resolve_configuration() -> RuntimeConfiguration {

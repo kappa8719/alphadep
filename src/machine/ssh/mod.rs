@@ -1,90 +1,75 @@
-pub mod channel;
 pub mod error;
-pub mod handler;
-pub mod sftp;
+mod task;
 
-use crate::machine::ssh::channel::SSHExecution;
-use crate::machine::ssh::handler::SSHHandle;
-use crate::{
-    machine::ssh::sftp::{Sftp, SftpOpenOptions},
-    machine::AsyncMachine,
-    runtime,
-};
-use interface::configuration::{
-    machine::{SSHIdentityConfiguration, SSHMachineConfiguration},
-    project::ProjectConfiguration,
-    runtime::RuntimeConfiguration,
-};
+use crate::{machine::AsyncMachine, runtime::RUNTIME_WRAPPER_BINARY};
+use interface::{ProjectSpecification, SSHIdentityConfiguration, SSHMachineConfiguration};
 use log::info;
-use makiko::ClientEvent;
-use std::path::PathBuf;
-use std::{
-    borrow::Cow,
-    fmt::{Debug, Display},
-    sync::Arc,
-    time::Duration,
-};
-use tokio::io::AsyncWriteExt;
+use std::{fs, io::Read, path::PathBuf};
 use tokio::net::TcpStream;
+use tokio::net::ToSocketAddrs;
 
 pub struct SSHMachine {
+    pub project: ProjectSpecification,
     pub configuration: SSHMachineConfiguration,
-
+    pub session: ssh2::Session,
 }
 
 impl SSHMachine {
-    pub async fn connect(configuration: SSHMachineConfiguration) -> Result<Self, anyhow::Error> {
-        let stream = TcpStream::connect(configuration.host).await?;
-        let config = makiko::ClientConfig::default_compatible_less_secure();
-        let (client, mut client_rx, client_fut) = makiko::Client::open(stream, config)?;
+    pub async fn handshake(
+        project: ProjectSpecification,
+        configuration: SSHMachineConfiguration,
+    ) -> Result<Self, error::HandshakeError> {
+        let addr = match tokio::net::lookup_host(configuration.host.clone()).await {
+            Ok(mut iter) => iter.next(),
+            Err(_) => tokio::net::lookup_host((configuration.host.clone(), 22)).await?.next(),
+        }
+        .unwrap();
 
-        tokio::task::spawn(client_fut);
+        let socket = TcpStream::connect(addr)
+            .await
+            .map_err(|e| error::HandshakeError::IO(e))?;
+        let Ok(mut session) = ssh2::Session::new() else {
+            return Err(error::HandshakeError::Unknown);
+        };
 
-        todo!()
+        session.set_tcp_stream(socket);
+        session.handshake()?;
+
+        Ok(Self {
+            project,
+            configuration,
+            session,
+        })
     }
 
-    pub async fn authenticate(&mut self) -> Result<(), anyhow::Error> {
+    pub async fn authenticate(&mut self) -> Result<(), error::AuthenticateError> {
         match self.configuration.identity.clone() {
             SSHIdentityConfiguration::Key { path } => {
-                let key = russh::keys::load_secret_key(path, None)?;
-                // let key = PrivateKey::from_bytes(fs::read(path)?.as_slice())?;
-                let key = Arc::new(key);
-                let key_with_hash_alg = PrivateKeyWithHashAlg::new(key, None);
+                let content = match fs::read_to_string(path) {
+                    Ok(content) => content,
+                    Err(error) => {
+                        return Err(error::AuthenticateError::Key(error::KeyError::IO(error)));
+                    }
+                };
 
-                Ok(self
-                    .handle
-                    .authenticate_key(self.configuration.user.clone(), key_with_hash_alg)
-                    .await?)
+                Ok(self.session.userauth_pubkey_memory(
+                    self.configuration.user.as_str(),
+                    None,
+                    content.as_str(),
+                    None,
+                )?)
             }
             SSHIdentityConfiguration::Password { value } => Ok(self
-                .handle
-                .authenticate_password(self.configuration.user.clone(), value)
-                .await?),
+                .session
+                .userauth_password(self.configuration.user.as_str(), value.as_str())?),
         }
     }
 
-    pub async fn acquire_sftp(&self) -> Result<Sftp, anyhow::Error> {
-        let channel = self.handle.handle.channel_open_session().await?;
-        channel.request_subsystem(true, "sftp").await?;
-        let session = SftpSession::new(channel.into_stream()).await?;
-
-        Ok(Sftp::new(session))
-    }
-
-    pub async fn close(&self) -> Result<(), anyhow::Error> {
-        self.handle.close().await?;
-        Ok(())
-    }
-
-    pub fn runtime_path(&self, project: ProjectConfiguration) -> PathBuf {
-        self.deployment_dir(project.clone()).join("runtime")
-    }
-
-    pub fn deployment_dir(&self, configuration: ProjectConfiguration) -> PathBuf {
+    pub fn deployment_dir(&self) -> PathBuf {
         PathBuf::from(format!(
             "/home/{}/.alphadep/deployments/{}",
             self.configuration.user.clone(),
-            configuration.deployment.id
+            self.project.deployment.id
         ))
     }
 }
@@ -95,155 +80,66 @@ impl AsyncMachine for SSHMachine {
     type ExecuteError = anyhow::Error;
 
     /// Update archive using temporary sftp tunnel
-    async fn update(&mut self, project: ProjectConfiguration) -> Result<(), Self::UpdateError> {
-        let sftp = self.acquire_sftp().await.unwrap();
+    async fn update(&mut self) -> Result<(), Self::UpdateError> {
+        let deployment_dir = self.deployment_dir();
 
-        // create deployment directory
-        sftp.create_dir_all(self.deployment_dir(project.clone()))
-            .await
-            .unwrap();
-
-        let archive_dst_path = self.deployment_dir(project.clone()).join("archive");
-
-        let mut archive_dst = sftp
-            .open_with_options(
-                archive_dst_path.to_str().unwrap_or(""),
-                SftpOpenOptions::from_flags(
-                    OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
-                ),
-            )
-            .await
-            .unwrap();
-
-        let archive_tmp_path = std::env::temp_dir()
-            .join("alphadep-archive")
-            .join(uuid::Uuid::new_v4().to_string());
-
-        if let Some(parent) = archive_tmp_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+        info!("update: uploading runtime");
+        task::UploadRuntime {
+            sftp: self.session.sftp()?,
+            binary: RUNTIME_WRAPPER_BINARY,
+            destination: deployment_dir.join("runtime"),
         }
+        .upload()?;
 
-        // scope to drop temporary archive file
-        {
-            // open temporary archive file
-            let mut archive_tmp = std::fs::File::options()
-                .write(true)
-                .create(true)
-                .open(archive_tmp_path.clone())
-                .unwrap();
-
-            project
-                .deployment
-                .files
-                .write_archive(&mut archive_tmp, vec!["./alphadep-archive"])?;
-
-            // open temporary archive file as async using tokio
-            let mut archive_tmp = tokio::fs::File::open(archive_tmp_path.clone())
-                .await
-                .unwrap();
-            tokio::io::copy(&mut archive_tmp, &mut archive_dst)
-                .await
-                .unwrap();
-
-            // handle drops here
+        info!("update: uploading archive");
+        task::UploadArchive {
+            sftp: self.session.sftp()?,
+            files: &self.project.deployment.files,
+            destination: deployment_dir.join("archive"),
         }
+        .upload()?;
 
-        // remove temporary archive file
-        std::fs::remove_file(archive_tmp_path).unwrap();
-
-        let runtime_path = self
-            .runtime_path(project.clone())
-            .to_str()
-            .unwrap()
-            .to_string();
-
-        // upload runtime
-        let mut runtime_dst = sftp
-            .open_with_options(
-                runtime_path.clone(),
-                SftpOpenOptions::from_flags(
-                    OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE,
-                )
-                .with_attributes(FileAttributes {
-                    permissions: Some(0o700),
-                    ..Default::default()
-                }),
-            )
-            .await
-            .unwrap();
-        runtime_dst
-            .write_all(runtime::RUNTIME_WRAPPER_BINARY)
-            .await
-            .unwrap();
-
-        let workdir = self.deployment_dir(project.clone()).join("work");
-
-        // create workdir
-        sftp.create_dir_all(workdir.clone()).await.unwrap();
-        sftp.close().await.unwrap();
-
-        let mut channel = self.handle.channel().await.unwrap();
-
-        // extract
-        let result = channel
-            .execute(format!(
-                "cd {workdir} && {r} extract --archive {src} --destination {dst}",
-                workdir = workdir.to_str().unwrap(),
-                r = runtime_path.clone(),
-                src = archive_dst_path.to_str().unwrap(),
-                dst = workdir.to_str().unwrap()
-            ))
-            .await
-            .unwrap();
-        info!("extract finished with code {:?}", result.exit);
-
-        let sftp = self.acquire_sftp().await.unwrap();
-        let mut runtime_configuration_dst = sftp
-            .open_with_options(
-                workdir.join("alphadep-runtime.toml").to_str().unwrap(),
-                SftpOpenOptions::from_flags(
-                    OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
-                ),
-            )
-            .await
-            .unwrap();
-
-        let runtime_configuration = RuntimeConfiguration::from(project.clone());
-        let runtime_configuration = toml::to_string(&runtime_configuration).unwrap();
-        runtime_configuration_dst
-            .write_all(runtime_configuration.as_bytes())
-            .await
-            .unwrap();
-
-        sftp.close().await.unwrap();
+        info!("update: extracting archive");
+        task::ExtractArchive {
+            channel: self.session.channel_session()?,
+            archive: deployment_dir.join("archive"),
+            destination: deployment_dir.join("work"),
+            runtime: deployment_dir.join("runtime"),
+        }
+        .extract()?;
 
         Ok(())
     }
 
-    async fn build(&mut self, project: ProjectConfiguration) -> Result<(), Self::BuildError> {
-        let mut channel = self.handle.channel().await?;
-
-        let workdir = self.deployment_dir(project.clone()).join("work");
+    async fn build(&mut self) -> Result<(), Self::BuildError> {
+        let workdir = self.deployment_dir().join("work");
         let runtime = self
-            .deployment_dir(project.clone())
+            .deployment_dir()
             .join("runtime")
             .to_str()
             .unwrap()
             .to_string();
 
+        let mut channel = self.session.channel_session()?;
+
         // execute
-        let result = channel
-            .execute(format!(
+        channel.exec(
+            format!(
                 "cd {wd} && {r} build",
                 wd = workdir.to_str().unwrap(),
                 r = runtime
-            ))
-            .await?;
+            )
+            .as_str(),
+        )?;
+
+        let mut stdout = String::new();
+        channel.read_to_string(&mut stdout)?;
+        let stdout = stdout;
+
         info!(
             "remote/ssh: build finished with code {:?}\n{}\n",
-            result.exit,
-            result
-                .data
+            channel.exit_status(),
+            stdout
                 .lines()
                 .map(|v| format!("remote/ssh/build: {v}"))
                 .collect::<Vec<_>>()
@@ -253,33 +149,38 @@ impl AsyncMachine for SSHMachine {
         Ok(())
     }
 
-    async fn execute(&mut self, project: ProjectConfiguration) -> Result<(), Self::ExecuteError> {
-        let mut channel = self.handle.channel().await?;
-
-        let workdir = self.deployment_dir(project.clone()).join("work");
+    async fn execute(&mut self) -> Result<(), Self::ExecuteError> {
+        let workdir = self.deployment_dir().join("work");
         let runtime = self
-            .deployment_dir(project.clone())
+            .deployment_dir()
             .join("runtime")
             .to_str()
             .unwrap()
             .to_string();
 
+        let mut channel = self.session.channel_session()?;
+
         // execute
         info!("execution: ----------------\n");
-        let result = channel
-            .execute(
-                SSHExecution::from(format!(
-                    "cd {wd} && {r} execute --silent",
-                    wd = workdir.to_str().unwrap(),
-                    r = runtime
-                ))
-                .with_redirected_output(),
+        channel.exec(
+            format!(
+                "cd {wd} && {r} execute --silent",
+                wd = workdir.to_str().unwrap(),
+                r = runtime
             )
-            .await?;
+            .as_str(),
+        )?;
+
+        while !channel.eof() {
+            let mut buf = Vec::new();
+            channel.read(buf.as_mut_slice())?;
+
+            info!("{:?}", buf);
+        }
 
         info!(
             "\nexecution: ----------------\nexecution: exited {exit:?}",
-            exit = result.exit
+            exit = channel.exit_status()
         );
 
         Ok(())

@@ -1,7 +1,7 @@
-use interface::configuration::project::ProjectConfiguration;
+use interface::ProjectSpecification;
 use std::path::PathBuf;
 
-pub struct DeploymentSpecs {
-    pub project: ProjectConfiguration,
+pub struct DeploymentSpecification {
+    pub project: ProjectSpecification,
     pub files: Vec<PathBuf>,
 }
