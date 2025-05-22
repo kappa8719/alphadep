@@ -1,27 +1,36 @@
 pub mod error;
+mod sftp;
+mod ssh;
 mod task;
 
 use crate::{machine::AsyncMachine, runtime::RUNTIME_WRAPPER_BINARY};
-use interface::{ProjectSpecification, SSHIdentityConfiguration, SSHMachineConfiguration};
+use interface::{
+    ProjectManifest, RuntimeManifest, SSHIdentityConfiguration, SSHMachineConfiguration,
+};
 use log::info;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fs, io::Read, path::PathBuf};
 use tokio::net::TcpStream;
 use tokio::net::ToSocketAddrs;
+use tokio::signal;
 
 pub struct SSHMachine {
-    pub project: ProjectSpecification,
+    pub project: ProjectManifest,
     pub configuration: SSHMachineConfiguration,
     pub session: ssh2::Session,
 }
 
 impl SSHMachine {
     pub async fn handshake(
-        project: ProjectSpecification,
+        project: ProjectManifest,
         configuration: SSHMachineConfiguration,
     ) -> Result<Self, error::HandshakeError> {
         let addr = match tokio::net::lookup_host(configuration.host.clone()).await {
             Ok(mut iter) => iter.next(),
-            Err(_) => tokio::net::lookup_host((configuration.host.clone(), 22)).await?.next(),
+            Err(_) => tokio::net::lookup_host((configuration.host.clone(), 22))
+                .await?
+                .next(),
         }
         .unwrap();
 
@@ -108,6 +117,14 @@ impl AsyncMachine for SSHMachine {
         }
         .extract()?;
 
+        info!("update: writing manifest");
+        task::UploadManifest {
+            sftp: self.session.sftp()?,
+            destination: deployment_dir.join("work/alphadep-runtime.toml"),
+            manifest: RuntimeManifest::from(self.project.clone()),
+        }
+        .upload()?;
+
         Ok(())
     }
 
@@ -171,12 +188,25 @@ impl AsyncMachine for SSHMachine {
             .as_str(),
         )?;
 
-        while !channel.eof() {
-            let mut buf = Vec::new();
-            channel.read(buf.as_mut_slice())?;
-
-            info!("{:?}", buf);
+        loop {
+            signal::ctrl_c().await?;
+            println!("ctrlc");
         }
+
+        // {
+        //     let sigint = Arc::new(AtomicBool::new(false));
+        //     signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&sigint))?;
+        //     while true {
+        //         // if channel.eof() {
+        //         //     break;
+        //         // }
+        //
+        //         let mut buf = Vec::new();
+        //         channel.read(buf.as_mut_slice())?;
+        //
+        //         print!("{}", String::from_utf8(buf)?);
+        //     }
+        // }
 
         info!(
             "\nexecution: ----------------\nexecution: exited {exit:?}",

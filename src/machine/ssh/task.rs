@@ -1,7 +1,14 @@
-use crate::machine::ssh::error::{ArchiveExtractError, ArchiveUploadError, SftpError};
-use interface::DeploymentFiles;
-use std::io::Write;
+use crate::machine::ssh::error::{
+    ArchiveExtractError, ArchiveUploadError, ManifestUploadError, SftpError,
+};
+use crate::machine::ssh::sftp::SftpExt;
+use crate::machine::ssh::ssh::ChannelExt;
+use interface::{DeploymentFiles, RuntimeManifest};
+use serde::Serialize;
+use ssh2::{OpenFlags, OpenType};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use toml::Serializer;
 
 pub struct UploadRuntime<'t, P: AsRef<Path>> {
     pub sftp: ssh2::Sftp,
@@ -13,10 +20,15 @@ impl<P: AsRef<Path>> UploadRuntime<'_, P> {
     pub fn upload(&self) -> Result<(), SftpError> {
         let destination = self.destination.as_ref();
         if let Some(parent) = destination.parent() {
-            self.sftp.mkdir(parent, 0o700)?;
+            self.sftp.mkdir_recursive(parent, 0o700)?;
         }
 
-        let mut file = self.sftp.open(self.destination.as_ref())?;
+        let mut file = self.sftp.open_mode(
+            destination,
+            OpenFlags::WRITE | OpenFlags::TRUNCATE,
+            0o700,
+            OpenType::File,
+        )?;
         file.write_all(self.binary)?;
 
         Ok(())
@@ -33,10 +45,10 @@ impl<P: AsRef<Path>> UploadArchive<'_, P> {
     pub fn upload(&self) -> Result<(), ArchiveUploadError> {
         let destination = self.destination.as_ref();
         if let Some(parent) = destination.parent() {
-            self.sftp.mkdir(parent, 0o700)?;
+            self.sftp.mkdir_recursive(parent, 0o700)?;
         }
 
-        let remote_archive = self.sftp.open(self.destination.as_ref())?;
+        let remote_archive = self.sftp.create(destination)?;
         self.files
             .write_archive(remote_archive, Vec::<PathBuf>::new())?;
 
@@ -64,6 +76,8 @@ impl<P: AsRef<Path>> ExtractArchive<P> {
             format!("{runtime} extract --archive {archive} --destination {destination}").as_str(),
         )?;
 
+        self.channel.consume();
+
         loop {
             self.channel.wait_eof()?;
 
@@ -79,5 +93,21 @@ impl<P: AsRef<Path>> ExtractArchive<P> {
                 return Ok(());
             }
         }
+    }
+}
+
+pub struct UploadManifest<P: AsRef<Path>> {
+    pub sftp: ssh2::Sftp,
+    pub destination: P,
+    pub manifest: RuntimeManifest,
+}
+
+impl<P: AsRef<Path>> UploadManifest<P> {
+    pub fn upload(&mut self) -> Result<(), ManifestUploadError> {
+        let manifest_as_string = toml::to_string(&self.manifest)?;
+        let mut file = self.sftp.create(self.destination.as_ref())?;
+        file.write(manifest_as_string.as_bytes())?;
+
+        Ok(())
     }
 }

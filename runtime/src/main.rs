@@ -2,7 +2,7 @@
 
 mod build;
 mod command;
-mod configuration;
+mod manifest;
 mod execute;
 mod extract;
 

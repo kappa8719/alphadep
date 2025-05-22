@@ -4,7 +4,7 @@ use crate::cli::args::CommandLineArgs;
 use crate::machine::AsyncMachine;
 use crate::machine::ssh::SSHMachine;
 use clap::Parser;
-use interface::{MachineConfiguration, ProjectSpecification};
+use interface::{MachineConfiguration, ProjectManifest};
 use log::info;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -19,7 +19,7 @@ pub fn handle() -> Result<(), ()> {
     file.read_to_string(&mut buffer)
         .expect("failed to read alphadep.toml");
 
-    let project = toml::from_str::<ProjectSpecification>(buffer.as_str())
+    let project = toml::from_str::<ProjectManifest>(buffer.as_str())
         .expect("failed to parse alphadep.toml");
 
     if cli_args.write_archive {

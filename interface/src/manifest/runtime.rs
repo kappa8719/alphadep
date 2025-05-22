@@ -1,4 +1,4 @@
-use crate::ProjectSpecification;
+use crate::ProjectManifest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -14,7 +14,7 @@ pub struct RuntimeExecutionConfiguration {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct RuntimeConfiguration {
+pub struct RuntimeManifest {
     pub build: RuntimeBuildConfiguration,
     pub execution: RuntimeExecutionConfiguration,
     #[serde(rename = "environment-variables")]
@@ -22,8 +22,8 @@ pub struct RuntimeConfiguration {
     pub created_at: SystemTime,
 }
 
-impl From<ProjectSpecification> for RuntimeConfiguration {
-    fn from(value: ProjectSpecification) -> Self {
+impl From<ProjectManifest> for RuntimeManifest {
+    fn from(value: ProjectManifest) -> Self {
         Self {
             build: RuntimeBuildConfiguration {
                 script: value.deployment.build.script,

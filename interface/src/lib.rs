@@ -1,5 +1,5 @@
 mod configuration;
-mod specification;
+mod manifest;
 
 pub use configuration::*;
-pub use specification::*;
+pub use manifest::*;

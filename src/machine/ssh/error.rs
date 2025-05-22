@@ -1,5 +1,5 @@
 use interface::DeploymentFileArchiveError;
-use ssh2::Error;
+use ssh2::{Error, ErrorCode};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -86,21 +86,28 @@ pub enum SftpError {
     Timeout,
     #[error("sftp operation or response was invalid")]
     Protocol,
-    #[error("sftp operation failed with unknown reason")]
-    Unknown,
+    #[error("sftp operation failed because there was no such file")]
+    NoSuchFile,
+    #[error("sftp operation failed with code {code}: {message}")]
+    Unknown { code: i32, message: String },
 }
 
 impl From<ssh2::Error> for SftpError {
     fn from(value: Error) -> Self {
-        let ssh2::ErrorCode::Session(code) = value.code() else {
-            return Self::Unknown;
+        let code = match value.code() {
+            ErrorCode::Session(code) => code as i32,
+            ErrorCode::SFTP(code) => code as i32,
         };
 
         match code {
             libssh2_sys::LIBSSH2_ERROR_SOCKET_SEND => Self::Socket,
             libssh2_sys::LIBSSH2_ERROR_SOCKET_TIMEOUT => Self::Timeout,
             libssh2_sys::LIBSSH2_ERROR_SFTP_PROTOCOL => Self::Protocol,
-            _ => Self::Unknown,
+            libssh2_sys::LIBSSH2_FX_NO_SUCH_FILE => Self::NoSuchFile,
+            _ => Self::Unknown {
+                code,
+                message: value.message().to_string(),
+            },
         }
     }
 }
@@ -156,5 +163,21 @@ pub enum ArchiveExtractError {
 impl From<ssh2::Error> for ArchiveExtractError {
     fn from(value: Error) -> Self {
         Self::ProcessStartup(ProcessStartupError::from(value))
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum ManifestUploadError {
+    #[error("manifest upload failed due to io error")]
+    IO(#[from] std::io::Error),
+    #[error("manifest upload failed due to sftp error")]
+    Sftp(#[from] SftpError),
+    #[error("manifest could not be serialized")]
+    Serialize(#[from] toml::ser::Error),
+}
+
+impl From<ssh2::Error> for ManifestUploadError {
+    fn from(value: Error) -> Self {
+        Self::from(SftpError::from(value))
     }
 }

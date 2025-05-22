@@ -1,6 +1,6 @@
 use crate::Instance;
 use crate::command::ExecuteArgs;
-use crate::configuration::resolve_configuration;
+use crate::manifest::resolve_manifest;
 use log::info;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
@@ -9,14 +9,14 @@ use std::os::linux::process::ChildExt;
 use std::sync::{Arc, Mutex};
 
 pub fn execute(instance: &mut Instance, args: ExecuteArgs) {
-    let configuration = resolve_configuration();
+    let manifest = resolve_manifest();
 
     if !args.silent {
         info!("execution: begin -\n");
     }
 
     let child = run_script::spawn(
-        configuration.execution.script.as_str(),
+        manifest.execution.script.as_str(),
         &vec![],
         &ScriptOptions {
             output_redirection: IoOptions::Inherit,
