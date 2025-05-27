@@ -7,7 +7,7 @@ use clap::Parser;
 use interface::{MachineConfiguration, ProjectManifest};
 use log::info;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 
 pub fn handle() -> Result<(), ()> {
     let cli_args = CommandLineArgs::parse();
@@ -19,8 +19,8 @@ pub fn handle() -> Result<(), ()> {
     file.read_to_string(&mut buffer)
         .expect("failed to read alphadep.toml");
 
-    let project = toml::from_str::<ProjectManifest>(buffer.as_str())
-        .expect("failed to parse alphadep.toml");
+    let project =
+        toml::from_str::<ProjectManifest>(buffer.as_str()).expect("failed to parse alphadep.toml");
 
     if cli_args.write_archive {
         println!("writing archive -");

@@ -9,9 +9,6 @@ mod util;
 
 fn main() -> ExitCode {
     colog::init();
-    ctrlc::set_handler(move || {
-        std::process::exit(0);
-    }).unwrap();
 
     match cli::handle() {
         Ok(_) => ExitCode::SUCCESS,

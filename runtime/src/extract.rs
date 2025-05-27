@@ -6,7 +6,7 @@ use std::os::unix::prelude::PermissionsExt;
 use std::path::PathBuf;
 use std::{fs, io};
 
-pub fn extract(instance: &mut Instance, args: ExtractArgs) {
+pub fn extract(_: &mut Instance, args: ExtractArgs) {
     println!("archive/extract: from {:?}", args.archive);
     let dest_root = match args.destination {
         None => PathBuf::from("."),

@@ -5,14 +5,15 @@ use log::info;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use run_script::{IoOptions, ScriptOptions};
-use std::os::linux::process::ChildExt;
 use std::sync::{Arc, Mutex};
 
-pub fn execute(instance: &mut Instance, args: ExecuteArgs) {
+pub fn execute(_: &mut Instance, args: ExecuteArgs) {
+    std::env::set_current_dir(args.directory).unwrap();
+
     let manifest = resolve_manifest();
 
     if !args.silent {
-        info!("execution: begin -\n");
+        info!("execution: begin -");
     }
 
     let child = run_script::spawn(
@@ -41,6 +42,6 @@ pub fn execute(instance: &mut Instance, args: ExecuteArgs) {
 
     let exit = child.lock().unwrap().wait().unwrap();
     if !args.silent {
-        info!("\nexecution: - exited {:?}", exit.code());
+        info!("execution: - exited {:?}", exit.code());
     }
 }

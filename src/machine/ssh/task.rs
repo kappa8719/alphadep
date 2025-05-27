@@ -4,11 +4,9 @@ use crate::machine::ssh::error::{
 use crate::machine::ssh::sftp::SftpExt;
 use crate::machine::ssh::ssh::ChannelExt;
 use interface::{DeploymentFiles, RuntimeManifest};
-use serde::Serialize;
 use ssh2::{OpenFlags, OpenType};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use toml::Serializer;
 
 pub struct UploadRuntime<'t, P: AsRef<Path>> {
     pub sftp: ssh2::Sftp,

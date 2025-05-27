@@ -4,7 +4,7 @@ use log::info;
 use std::io::{Write, stderr};
 use std::process::Command;
 
-pub fn build(instance: &mut Instance) {
+pub fn build(_: &mut Instance) {
     let configuration = resolve_manifest();
 
     let Some(build_script) = configuration.build.script.clone() else {

@@ -9,11 +9,9 @@ use interface::{
 };
 use log::info;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::{fs, io::Read, path::PathBuf};
 use tokio::net::TcpStream;
-use tokio::net::ToSocketAddrs;
-use tokio::signal;
 
 pub struct SSHMachine {
     pub project: ProjectManifest,
@@ -26,13 +24,15 @@ impl SSHMachine {
         project: ProjectManifest,
         configuration: SSHMachineConfiguration,
     ) -> Result<Self, error::HandshakeError> {
-        let addr = match tokio::net::lookup_host(configuration.host.clone()).await {
+        let addr = match match tokio::net::lookup_host(configuration.host.clone()).await {
             Ok(mut iter) => iter.next(),
             Err(_) => tokio::net::lookup_host((configuration.host.clone(), 22))
                 .await?
                 .next(),
-        }
-        .unwrap();
+        } {
+            None => return Err(error::HandshakeError::Lookup),
+            Some(addr) => addr,
+        };
 
         let socket = TcpStream::connect(addr)
             .await
@@ -177,41 +177,78 @@ impl AsyncMachine for SSHMachine {
 
         let mut channel = self.session.channel_session()?;
 
+        // loop {
+        //     channel.request_pty("xterm", None, None)?;
+        //     channel.handle_extended_data(ssh2::ExtendedData::Merge)?;
+        //     channel.shell()?;
+        //
+        //     let stdout = std::io::stdout();
+        //     let mut stdout = stdout;
+        //     let mut stdin = std::io::stdin();
+        //
+        //     let mut buff_in = Vec::new();
+        //     while !channel.eof() {
+        //         let bytes_available = channel.read_window().available;
+        //         if bytes_available > 0 {
+        //             let mut buffer = vec![0; bytes_available as usize];
+        //             channel.read_exact(&mut buffer)?;
+        //             let _ = stdout.write(&buffer);
+        //             let _ = stdout.flush();
+        //         }
+        //
+        //         // Using async_stdin to avoid blocking, should this also respect the WriteWindow?
+        //         stdin.read(&mut buff_in)?;
+        //         let _ = channel.write(&buff_in);
+        //         buff_in.clear();
+        //     }
+        //     channel.wait_close()?;
+        // }
+
         // execute
-        info!("execution: ----------------\n");
+        info!("execution: ----------------");
+        info!("");
         channel.exec(
             format!(
-                "cd {wd} && {r} execute --silent",
+                "{r} execute --directory {wd}",
                 wd = workdir.to_str().unwrap(),
                 r = runtime
             )
             .as_str(),
         )?;
 
-        loop {
-            signal::ctrl_c().await?;
-            println!("ctrlc");
+        unsafe {
+            let sigint = Arc::new(AtomicBool::new(false));
+            signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&sigint))?;
+
+            loop {
+                let locked = channel.lock();
+
+                let mut buffer = [0u8; 32];
+                let bytes = libssh2_sys::libssh2_channel_read_ex(
+                    locked.raw,
+                    0 as std::ffi::c_int,
+                    buffer.as_mut_ptr() as *mut _,
+                    buffer.len(),
+                );
+
+                if bytes > 0 {
+                    println!("read {bytes} bytes");
+                }
+            }
         }
 
-        // {
-        //     let sigint = Arc::new(AtomicBool::new(false));
-        //     signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&sigint))?;
-        //     while true {
-        //         // if channel.eof() {
-        //         //     break;
-        //         // }
-        //
-        //         let mut buf = Vec::new();
-        //         channel.read(buf.as_mut_slice())?;
-        //
-        //         print!("{}", String::from_utf8(buf)?);
-        //     }
-        // }
+        if channel.read_window().available > 0 {
+            info!("available");
+            let mut buf = String::new();
+            channel.read_to_string(&mut buf)?;
+            info!("{}", buf);
+        }
 
-        info!(
-            "\nexecution: ----------------\nexecution: exited {exit:?}",
-            exit = channel.exit_status()
-        );
+        channel.wait_eof()?;
+        channel.wait_close()?;
+
+        info!("execution: ----------------");
+        info!("execution: exited {exit:?}", exit = channel.exit_status());
 
         Ok(())
     }

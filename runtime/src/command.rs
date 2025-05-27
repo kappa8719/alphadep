@@ -16,6 +16,8 @@ pub struct ExtractArgs {
 pub struct ExecuteArgs {
     #[arg(long = "silent", default_value_t = false)]
     pub(crate) silent: bool,
+    #[arg(long = "directory", default_value_t = (".".to_string()))]
+    pub directory: String,
 }
 
 #[derive(Subcommand, Debug)]

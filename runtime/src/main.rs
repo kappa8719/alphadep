@@ -10,10 +10,7 @@ use crate::build::build;
 use crate::command::{CommandLineArgs, Commands};
 use crate::execute::execute;
 use crate::extract::extract;
-use clap::{Args, Parser, Subcommand};
-use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::prelude::CommandExt;
+use clap::{ Parser};
 
 #[derive(Default)]
 struct Instance;

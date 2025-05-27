@@ -1,5 +1,6 @@
 pub mod ssh;
 
+#[allow(dead_code)]
 pub trait Machine {
     type UpdateError;
     type BuildError;
@@ -10,12 +11,13 @@ pub trait Machine {
     fn execute(&self) -> Result<(), Self::ExecuteError>;
 }
 
+#[allow(dead_code)]
 pub trait AsyncMachine {
     type UpdateError;
     type BuildError;
     type ExecuteError;
 
-    async fn update(&mut self) -> Result<(), Self::UpdateError>;
-    async fn build(&mut self) -> Result<(), Self::BuildError>;
-    async fn execute(&mut self) -> Result<(), Self::ExecuteError>;
+    fn update(&mut self) -> impl Future<Output = Result<(), Self::UpdateError>> + Send;
+    fn build(&mut self) -> impl Future<Output = Result<(), Self::BuildError>> + Send;
+    fn execute(&mut self) -> impl Future<Output = Result<(), Self::ExecuteError>> + Send;
 }

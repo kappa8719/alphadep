@@ -1,7 +1,6 @@
 use glob::glob;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::fs::File;
 use std::io;
 use std::io::{Seek, Write};
