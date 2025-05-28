@@ -7,9 +7,11 @@ use crate::{machine::AsyncMachine, runtime::RUNTIME_WRAPPER_BINARY};
 use interface::{
     ProjectManifest, RuntimeManifest, SSHIdentityConfiguration, SSHMachineConfiguration,
 };
+use log::__private_api::loc;
 use log::info;
+use std::ops::Deref;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fs, io::Read, path::PathBuf};
 use tokio::net::TcpStream;
 
@@ -221,6 +223,28 @@ impl AsyncMachine for SSHMachine {
             signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&sigint))?;
 
             loop {
+                {
+                    let locked = channel.lock();
+                    let mut avail = 0;
+                    let mut init = 0;
+                    libssh2_sys::libssh2_channel_window_read_ex(locked.raw, &mut avail, &mut init);
+                    info!("available to read: {} | initial size: {}", avail, init);
+                }
+
+                if sigint.load(Ordering::Relaxed) {
+                    info!("aborting");
+                    break;
+                }
+
+                if channel.eof() {
+                    info!("end of file");
+                    break;
+                }
+
+                // if matches!(channel.exit_status(), Ok(_)) {
+                //     break;
+                // }
+
                 let locked = channel.lock();
 
                 let mut buffer = [0u8; 32];
@@ -232,16 +256,10 @@ impl AsyncMachine for SSHMachine {
                 );
 
                 if bytes > 0 {
-                    println!("read {bytes} bytes");
+                    let text = str::from_utf8(&buffer[0..(bytes as usize)])?;
+                    print!("{text}");
                 }
             }
-        }
-
-        if channel.read_window().available > 0 {
-            info!("available");
-            let mut buf = String::new();
-            channel.read_to_string(&mut buf)?;
-            info!("{}", buf);
         }
 
         channel.wait_eof()?;
